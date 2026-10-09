@@ -1,0 +1,23 @@
+# 密钥文件
+.streamlit/secrets.toml
+.streamlit/
+streamlit/secrets.toml
+secrets.toml
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+
+# 系统文件
+.DS_Store
+Thumbs.db
