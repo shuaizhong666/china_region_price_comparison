@@ -83,10 +83,11 @@ APP_ID = st.secrets["feishu"]["app_id"]
 APP_SECRET = st.secrets["feishu"]["app_secret"]
 APP_TOKEN = st.secrets["feishu"]["app_token"]
 
+# ⚠️ 关键修改：去掉 view_id，直接拉取整张表（含历史数据）
 FEISHU_TABLES = {
-    "京东": {"table_id": "tblmispSYGtkWZbU", "view_id": "vewCFnAd4b"},
-    "天猫": {"table_id": "tblB2s1GxLyltgOg", "view_id": "vewO1mE83h"},
-    "拼多多": {"table_id": "tbl31Jw9F8PFwzeH", "view_id": "vewFsRczlm"},
+    "京东": {"table_id": "tblmispSYGtkWZbU"},
+    "天猫": {"table_id": "tblB2s1GxLyltgOg"},
+    "拼多多": {"table_id": "tbl31Jw9F8PFwzeH"},
 }
 
 FEISHU_BASE = "https://open.feishu.cn/open-apis"
@@ -111,22 +112,15 @@ PLATFORM_BADGE_HTML = {
     "拼多多": "<span class='plat-badge' style='background:#8e24aa;'>拼多多</span>",
 }
 
-# 北京时间时区
 BEIJING_TZ = "Asia/Shanghai"
 
 
 # ============================================================
-# 时间戳转换（关键修复：处理 UTC 时区问题）
+# 时间戳转换（含时区修复）
 # ============================================================
 def convert_time_column(series: pd.Series) -> pd.Series:
-    """
-    将飞书返回的时间字段统一转为北京时间（naive datetime）。
-    - 数值型（毫秒时间戳）：按 UTC 解析 → 转北京时间
-    - 字符串/其他：直接 pd.to_datetime
-    """
     if series is None or len(series) == 0:
         return series
-
     if pd.api.types.is_numeric_dtype(series):
         try:
             result = pd.to_datetime(series, unit="ms", utc=True, errors="coerce")
@@ -151,17 +145,17 @@ def get_tenant_access_token() -> str:
     return data["tenant_access_token"]
 
 
-def _fetch_records(token: str, table_id: str, view_id: str = "") -> list:
+def _fetch_records(token: str, table_id: str) -> list:
+    """拉取整张表全部记录（不传 view_id，避免视图筛选导致只能看到当天数据）"""
     headers = {"Authorization": f"Bearer {token}"}
     records, page_token = [], None
     while True:
         url = f"{FEISHU_BASE}/bitable/v1/apps/{APP_TOKEN}/tables/{table_id}/records"
         params = {"page_size": 500}
-        if view_id:
-            params["view_id"] = view_id
+        # 注意：这里故意不传 view_id
         if page_token:
             params["page_token"] = page_token
-        resp = requests.get(url, headers=headers, params=params, timeout=30)
+        resp = requests.get(url, headers=headers, params=params, timeout=60)
         data = resp.json()
         if data.get("code") != 0:
             raise RuntimeError(f"读取表 {table_id} 失败: {data.get('msg', data)}")
@@ -172,12 +166,12 @@ def _fetch_records(token: str, table_id: str, view_id: str = "") -> list:
     return records
 
 
-@st.cache_data(ttl=600, show_spinner="正在从飞书多维表格拉取数据...")
+@st.cache_data(ttl=600, show_spinner="正在从飞书多维表格拉取全部历史数据...")
 def load_data() -> pd.DataFrame:
     token = get_tenant_access_token()
     frames = []
     for platform_name, cfg in FEISHU_TABLES.items():
-        records = _fetch_records(token, cfg["table_id"], cfg.get("view_id", ""))
+        records = _fetch_records(token, cfg["table_id"])
         if not records:
             continue
         rows = [{"_record_id": r.get("record_id", ""), **r.get("fields", {})} for r in records]
@@ -200,7 +194,6 @@ def load_data() -> pd.DataFrame:
     else:
         df["平台"] = df["平台"].fillna(df["_platform_source"])
 
-    # 时间字段统一转换（含时区修复）
     for date_col in ["日期", "记录时间"]:
         if date_col in df.columns:
             df[date_col] = convert_time_column(df[date_col])
@@ -235,7 +228,7 @@ def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def dedupe_by_latest(df: pd.DataFrame) -> pd.DataFrame:
-    """时间点快照去重：每个商品（平台+店铺+型号+SKU）只保留记录时间最新的一条"""
+    """时间点快照去重：每个商品只保留记录时间最新的一条"""
     if df.empty:
         return df
     df = df.copy()
@@ -567,7 +560,7 @@ if missing:
 
 df_all = dedupe_latest(df_raw)
 
-# 数据最新记录时间（显示在顶部）
+# 数据最新记录时间
 data_updated_at = None
 for c in ["记录时间", "日期"]:
     if c in df_all.columns:
@@ -592,7 +585,6 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ---------- 日期选择器（放宽可选范围）----------
     start_date, end_date = None, None
 
     if "日期" in df_all.columns and df_all["日期"].notna().any():
@@ -601,9 +593,10 @@ with st.sidebar:
         max_d = valid_dates.max().date()
         today = datetime.now().date()
 
-        # 放开可选范围：从数据最早日期前 30 天，到"今天"（允许超出数据范围）
         selectable_min = min_d - timedelta(days=30)
         selectable_max = max(max_d, today)
+
+        st.caption(f"📊 数据范围：{min_d} ~ {max_d}")
 
         if snapshot_mode:
             as_of_date = st.date_input(
@@ -611,7 +604,7 @@ with st.sidebar:
                 value=max_d,
                 min_value=selectable_min,
                 max_value=selectable_max,
-                help=f"数据实际范围：{min_d} ~ {max_d}\n可选择范围内任意日期，超出数据范围的日期将无记录",
+                help=f"显示每个商品在该日期及之前的最新一次采集记录",
             )
             end_date = as_of_date
             start_date = None
@@ -622,7 +615,6 @@ with st.sidebar:
                 value=(default_start, max_d),
                 min_value=selectable_min,
                 max_value=selectable_max,
-                help=f"数据实际范围：{min_d} ~ {max_d}",
             )
             if isinstance(date_pick, (tuple, list)) and len(date_pick) == 2:
                 start_date, end_date = date_pick
@@ -668,26 +660,21 @@ with st.sidebar:
 # ============================================================
 df = df_all[df_all["平台"].isin(sel_platforms)].copy() if sel_platforms else df_all.copy()
 
-# 日期过滤：先过滤到 <= end_date
 if end_date and "日期" in df.columns:
     df = df[df["日期"].dt.date <= end_date]
 
-# 区间模式：再过滤 >= start_date
 if not snapshot_mode and start_date and "日期" in df.columns:
     df = df[df["日期"].dt.date >= start_date]
 
-# 店铺筛选
 if "店铺" in df.columns and sel_shops:
     df = df[df["店铺"].isin(sel_shops) | df["店铺"].isna()]
 
-# 丢弃关键价格缺失
 df = df.dropna(subset=["公司限定价", "店铺到手价"])
 
 if df.empty:
     st.warning("⚠️ 当前筛选条件下没有数据，请调整日期或筛选条件。")
     st.stop()
 
-# 去重
 if snapshot_mode:
     df = dedupe_by_latest(df)
 else:
