@@ -23,8 +23,6 @@ st.markdown(
     """
     <style>
     .stApp { background: #f5f7fa; }
-
-    /* 顶部告警横幅 */
     .alert-banner {
         background: linear-gradient(90deg, #7f1d1d 0%, #dc2626 100%);
         color: white; padding: 22px 30px; border-radius: 12px;
@@ -39,19 +37,12 @@ st.markdown(
         background: linear-gradient(90deg, #78350f 0%, #f59e0b 100%);
         box-shadow: 0 4px 16px rgba(245,158,11,0.25);
     }
-    .alert-num {
-        font-size: 52px; font-weight: 800; line-height: 1;
-        min-width: 90px; text-align: center;
-    }
+    .alert-num { font-size: 52px; font-weight: 800; line-height: 1; min-width: 90px; text-align: center; }
     .alert-text { flex: 1; }
     .alert-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
     .alert-desc { font-size: 14px; opacity: 0.92; line-height: 1.5; }
-    .alert-action {
-        background: rgba(255,255,255,0.2); padding: 10px 18px;
-        border-radius: 8px; font-size: 13px; font-weight: 600;
-    }
+    .alert-action { background: rgba(255,255,255,0.2); padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; }
 
-    /* KPI 卡片 */
     .kpi-card {
         background: white; border-radius: 10px; padding: 18px 20px;
         border-left: 4px solid #3b82f6;
@@ -65,50 +56,19 @@ st.markdown(
     .kpi-value { font-size: 28px; font-weight: 700; color: #0f172a; line-height: 1.2; }
     .kpi-sub { font-size: 12px; color: #94a3b8; margin-top: 6px; }
 
-    /* 严重程度标签 */
-    .sev-critical {
-        display: inline-block; background: #dc2626; color: white;
-        padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;
-    }
-    .sev-medium {
-        display: inline-block; background: #f59e0b; color: white;
-        padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;
-    }
-    .sev-light {
-        display: inline-block; background: #facc15; color: #422006;
-        padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700;
-    }
-    .plat-badge {
-        display: inline-block; padding: 2px 8px; border-radius: 8px;
-        color: white; font-size: 11px; font-weight: 600; margin-right: 4px;
-    }
+    .sev-critical { display: inline-block; background: #dc2626; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+    .sev-medium { display: inline-block; background: #f59e0b; color: white; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+    .sev-light { display: inline-block; background: #facc15; color: #422006; padding: 2px 10px; border-radius: 4px; font-size: 12px; font-weight: 700; }
+    .plat-badge { display: inline-block; padding: 2px 8px; border-radius: 8px; color: white; font-size: 11px; font-weight: 600; margin-right: 4px; }
 
-    /* 店铺分组卡片 */
-    .shop-group {
-        background: white; border-radius: 10px; padding: 16px 20px;
-        margin-bottom: 12px; border-left: 4px solid #dc2626;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.06);
-    }
-    .shop-group.watch {
-        border-left-color: #7c3aed;
-        background: linear-gradient(90deg, #faf5ff 0%, #ffffff 100%);
-    }
-    .shop-name {
-        font-size: 17px; font-weight: 700; color: #0f172a;
-        display: flex; align-items: center; gap: 10px;
-    }
-    .shop-stats {
-        color: #64748b; font-size: 13px; margin-top: 4px;
-    }
-    .shop-amount {
-        font-size: 20px; font-weight: 800; color: #dc2626;
-    }
+    .shop-group { background: white; border-radius: 10px; padding: 16px 20px; margin-bottom: 12px; border-left: 4px solid #dc2626; box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
+    .shop-group.watch { border-left-color: #7c3aed; background: linear-gradient(90deg, #faf5ff 0%, #ffffff 100%); }
+    .shop-name { font-size: 17px; font-weight: 700; color: #0f172a; display: flex; align-items: center; gap: 10px; }
+    .shop-stats { color: #64748b; font-size: 13px; margin-top: 4px; }
+    .shop-amount { font-size: 20px; font-weight: 800; color: #dc2626; }
 
-    /* Tab 样式 */
     .stTabs [data-baseweb="tab-list"] { gap: 4px; }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0; padding: 10px 18px; font-weight: 600;
-    }
+    .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0 0; padding: 10px 18px; font-weight: 600; }
     footer {visibility: hidden;}
     #MainMenu {visibility: hidden;}
     </style>
@@ -119,7 +79,6 @@ st.markdown(
 # ============================================================
 # 飞书应用凭证
 # ============================================================
-# 从 st.secrets 读取凭证（本地 .streamlit/secrets.toml，线上 Streamlit Cloud Secrets）
 APP_ID = st.secrets["feishu"]["app_id"]
 APP_SECRET = st.secrets["feishu"]["app_secret"]
 APP_TOKEN = st.secrets["feishu"]["app_token"]
@@ -229,9 +188,10 @@ def load_data() -> pd.DataFrame:
 
 
 # ============================================================
-# 去重
+# 去重函数
 # ============================================================
 def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
+    """区间去重：同一天同一商品多次采集，只保留记录时间最新的一条"""
     if df.empty:
         return df
     df = df.copy()
@@ -250,16 +210,23 @@ def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def keep_latest_snapshot(df: pd.DataFrame) -> pd.DataFrame:
-    if df.empty or "日期" not in df.columns:
+def dedupe_by_latest(df: pd.DataFrame) -> pd.DataFrame:
+    """时间点快照去重：每个商品（平台+店铺+型号+SKU）只保留记录时间最新的一条（不区分日期）"""
+    if df.empty:
         return df
     df = df.copy()
-    group_cols = [c for c in ["平台", "店铺", "型号", "SKU ID"] if c in df.columns]
-    if not group_cols:
+    key_cols = [c for c in ["平台", "店铺", "型号", "SKU ID"] if c in df.columns]
+    if not key_cols:
         return df
-    df["_max_date"] = df.groupby(group_cols)["日期"].transform("max")
-    df = df[df["日期"] == df["_max_date"]].drop(columns=["_max_date"])
-    return dedupe_latest(df)
+    sort_cols = []
+    if "记录时间" in df.columns:
+        sort_cols.append("记录时间")
+    if "日期" in df.columns and "日期" not in sort_cols:
+        sort_cols.append("日期")
+    if sort_cols:
+        df = df.sort_values(sort_cols, ascending=False, na_position="last")
+    df = df.drop_duplicates(subset=key_cols, keep="first")
+    return df.reset_index(drop=True)
 
 
 # ============================================================
@@ -291,14 +258,12 @@ def kpi_card(label: str, value: str, sub: str = "", variant: str = ""):
 
 def render_alert_banner(broken_count: int, broken_shops: int, severe_count: int):
     if broken_count == 0:
-        cls = "alert-banner safe"
-        num = "0"
+        cls, num = "alert-banner safe", "0"
         title = "价格体系正常 · 无乱价"
         desc = "当前筛选范围内未检测到任何乱价行为，所有商品价格合规。"
         action = "✅ 继续保持"
     elif severe_count > 0:
-        cls = "alert-banner"
-        num = str(broken_count)
+        cls, num = "alert-banner", str(broken_count)
         title = f"检测到 {broken_count} 条乱价记录 · 需立即处理"
         desc = (
             f"涉及 {broken_shops} 家店铺，其中 <b style='background:rgba(255,255,255,0.25);"
@@ -307,8 +272,7 @@ def render_alert_banner(broken_count: int, broken_shops: int, severe_count: int)
         )
         action = "⚡ 立即介入"
     else:
-        cls = "alert-banner warn"
-        num = str(broken_count)
+        cls, num = "alert-banner warn", str(broken_count)
         title = f"检测到 {broken_count} 条乱价记录 · 建议跟进"
         desc = f"涉及 {broken_shops} 家店铺，暂无严重乱价，建议按流程通知店铺调价。"
         action = "📞 及时跟进"
@@ -596,12 +560,51 @@ with st.sidebar:
 
     view_mode = st.radio(
         "数据视图",
-        ["📸 最新快照", "📅 全期去重"],
-        help="最新快照：每商品最新一天\n全期去重：每天一条保留历史",
+        ["📸 时间点快照", "📅 区间去重"],
+        help="时间点快照：查看截至某个日期每个商品的最新价格\n区间去重：查看日期区间内每天一条记录",
     )
     snapshot_mode = view_mode.startswith("📸")
 
     st.markdown("---")
+
+    # ---------- 日期选择器（关键修改：两种模式都支持历史）----------
+    start_date, end_date = None, None
+
+    if "日期" in df_all.columns and df_all["日期"].notna().any():
+        valid_dates = df_all["日期"].dropna()
+        min_d = valid_dates.min().date()
+        max_d = valid_dates.max().date()
+
+        if snapshot_mode:
+            # 时间点快照：选择单个"截至日期"，默认数据最新日期
+            as_of_date = st.date_input(
+                "📅 查看截至日期",
+                value=max_d,
+                min_value=min_d,
+                max_value=max_d,
+                help="显示每个商品在该日期及之前的最新一次采集记录",
+            )
+            end_date = as_of_date
+            start_date = None
+        else:
+            # 区间去重：选择起始和截止日期
+            default_start = max(min_d, max_d - timedelta(days=30))
+            date_pick = st.date_input(
+                "📅 日期范围",
+                value=(default_start, max_d),
+                min_value=min_d,
+                max_value=max_d,
+                help="选择要查看的日期区间",
+            )
+            if isinstance(date_pick, (tuple, list)) and len(date_pick) == 2:
+                start_date, end_date = date_pick
+            else:
+                start_date = end_date = min_d
+    else:
+        st.caption("（无日期字段，跳过日期筛选）")
+
+    st.markdown("---")
+
     search_query = st.text_input(
         "🔍 搜索型号 / SKU ID", "",
         placeholder="型号名或 SKU ID",
@@ -612,21 +615,6 @@ with st.sidebar:
     all_platforms = sorted(df_all["平台"].dropna().unique().tolist())
     sel_platforms = st.multiselect("平台", all_platforms, default=all_platforms,
                                     label_visibility="collapsed")
-
-    st.markdown("---")
-    if not snapshot_mode and "日期" in df_all.columns and df_all["日期"].notna().any():
-        valid_dates = df_all["日期"].dropna()
-        min_d = valid_dates.min().date()
-        max_d = valid_dates.max().date()
-        default_start = max(min_d, max_d - timedelta(days=30))
-        date_pick = st.date_input("📅 日期范围", value=(default_start, max_d),
-                                   min_value=min_d, max_value=max_d)
-        if isinstance(date_pick, (tuple, list)) and len(date_pick) == 2:
-            start_date, end_date = date_pick
-        else:
-            start_date, end_date = min_d, max_d
-    else:
-        start_date, end_date = None, None
 
     st.markdown("---")
     st.markdown("**🎯 监控品类**")
@@ -652,20 +640,30 @@ with st.sidebar:
 # ============================================================
 df = df_all[df_all["平台"].isin(sel_platforms)].copy() if sel_platforms else df_all.copy()
 
-if not snapshot_mode and start_date and end_date and "日期" in df.columns:
-    df = df[(df["日期"].dt.date >= start_date) & (df["日期"].dt.date <= end_date)]
+# 日期过滤：先过滤到 <= end_date
+if end_date and "日期" in df.columns:
+    df = df[df["日期"].dt.date <= end_date]
 
+# 区间模式：再过滤 >= start_date
+if not snapshot_mode and start_date and "日期" in df.columns:
+    df = df[df["日期"].dt.date >= start_date]
+
+# 店铺筛选
 if "店铺" in df.columns and sel_shops:
     df = df[df["店铺"].isin(sel_shops) | df["店铺"].isna()]
 
+# 丢弃关键价格缺失
 df = df.dropna(subset=["公司限定价", "店铺到手价"])
 
 if df.empty:
-    st.warning("⚠️ 当前筛选条件下没有数据。")
+    st.warning("⚠️ 当前筛选条件下没有数据，请调整日期或筛选条件。")
     st.stop()
 
+# 去重：时间点快照用 dedupe_by_latest，区间去重用 dedupe_latest
 if snapshot_mode:
-    df = keep_latest_snapshot(df)
+    df = dedupe_by_latest(df)
+else:
+    df = dedupe_latest(df)
 
 if df.empty:
     st.warning("⚠️ 处理后没有数据。")
@@ -701,11 +699,20 @@ if data_updated_at is not None:
     else:
         freshness = f"（{delta_min // 1440} 天前）"
 
+# 日期描述
+if snapshot_mode:
+    date_desc = f"📸 截至 {end_date}" if end_date else "📸 时间点快照"
+else:
+    if start_date and end_date:
+        date_desc = f"📅 {start_date} ~ {end_date}"
+    else:
+        date_desc = "📅 全期"
+
 st.markdown(
     f"<h2 style='margin-bottom:6px;'>🚨 乱价监控看板</h2>"
     f"<p style='color:#64748b;font-size:13px;margin-bottom:18px;'>"
-    f"数据更新至 {updated_str} {freshness} · 覆盖京东 / 天猫 / 拼多多 · "
-    f"视图：{'最新快照' if snapshot_mode else '全期去重'}</p>",
+    f"数据最新更新至 {updated_str} {freshness} · 覆盖京东 / 天猫 / 拼多多 · "
+    f"{date_desc}</p>",
     unsafe_allow_html=True,
 )
 
@@ -801,7 +808,7 @@ if search_query and search_query.strip():
 
 
 # ============================================================
-# 主区 Tab（新增「全部数据」）
+# 主区 Tab
 # ============================================================
 tab_workbench, tab_shop, tab_model, tab_trend, tab_overview, tab_alldata = st.tabs(
     ["🚨 乱价处理台", "🏪 店铺乱价榜", "📦 型号乱价榜",
@@ -898,7 +905,6 @@ with tab_workbench:
                         "SKU ID": st.column_config.TextColumn("SKU ID"),
                     },
                 )
-
         else:
             if wb_df.empty:
                 st.info("没有符合筛选条件的乱价记录。")
@@ -932,9 +938,7 @@ with tab_workbench:
                 start = (page - 1) * page_size_int
                 end = min(start + page_size_int, len(shop_groups))
 
-                st.caption(
-                    f"显示第 {start+1} – {end} 家，共 {len(shop_groups)} 家店铺"
-                )
+                st.caption(f"显示第 {start+1} – {end} 家，共 {len(shop_groups)} 家店铺")
 
                 for _, srow in shop_groups.iloc[start:end].iterrows():
                     shop_name = srow["店铺"]
@@ -1150,7 +1154,7 @@ with tab_model:
 # ============================================================
 with tab_trend:
     st.markdown("### 📈 乱价趋势分析")
-    st.caption("💡 观察乱价问题是在好转还是恶化。")
+    st.caption("💡 观察乱价问题是在好转还是恶化（仅区间模式下有意义）。")
 
     if "日期" not in df.columns or df["日期"].isna().all():
         st.info("当前数据没有日期字段，无法绘制趋势图。")
@@ -1302,7 +1306,7 @@ with tab_overview:
 
 
 # ============================================================
-# ⭐ Tab 6：全部数据（新增）
+# Tab 6：全部数据
 # ============================================================
 with tab_alldata:
     st.markdown("### 📋 全部数据")
@@ -1311,7 +1315,6 @@ with tab_alldata:
         "支持按状态/平台/店铺/品类筛选，列可自选，分页查看。"
     )
 
-    # ---- 筛选栏 ----
     flt1, flt2, flt3, flt4 = st.columns([2, 2, 2, 2])
 
     with flt1:
@@ -1340,7 +1343,6 @@ with tab_alldata:
             placeholder="不选=全部店铺",
         )
 
-    # ---- 应用筛选 ----
     all_df = df_main.copy()
     status_map = all_df["is_broken"].map({True: "🚨 乱价", False: "✅ 合规"})
     all_df = all_df[status_map.isin(status_filter)]
@@ -1352,7 +1354,6 @@ with tab_alldata:
     if shop_filter and "店铺" in all_df.columns:
         all_df = all_df[all_df["店铺"].isin(shop_filter)]
 
-    # ---- 统计条 ----
     s1, s2, s3, s4, s5 = st.columns(5)
     s1.metric("筛选后记录", f"{len(all_df):,}")
     s2.metric("涉及型号", f"{all_df['型号'].nunique()}" if not all_df.empty else "0")
@@ -1365,19 +1366,15 @@ with tab_alldata:
 
     st.markdown("---")
 
-    # ---- 列自选 ----
     all_columns = [c for c in all_df.columns if not c.startswith("_")]
-    # 排除内部技术列
     all_columns = [c for c in all_columns if c not in ["_record_id", "_platform_source"]]
 
-    # 默认展示的列顺序
     default_cols = [c for c in [
         "严重程度", "平台", "店铺", "品类", "型号", "SKU ID",
         "公司限定价", "店铺到手价", "平台页面价", "破价金额",
         "页面产品名称", "商品链接", "日期", "记录时间",
     ] if c in all_columns]
 
-    # 其余列附加在后面
     other_cols = [c for c in all_columns if c not in default_cols]
 
     with st.expander("🔧 自定义显示列", expanded=False):
@@ -1393,7 +1390,6 @@ with tab_alldata:
 
     all_display = all_df[selected_cols].copy()
 
-    # 排序选择
     sort_c1, sort_c2 = st.columns([2, 5])
     with sort_c1:
         sort_by = st.selectbox(
@@ -1418,7 +1414,6 @@ with tab_alldata:
 
     all_display = all_display.reset_index(drop=True)
 
-    # ---- 渲染分页表格 ----
     if all_display.empty:
         st.info("没有符合筛选条件的数据。")
     else:
@@ -1438,7 +1433,6 @@ with tab_alldata:
             },
         )
 
-        # 单独导出当前筛选结果
         st.markdown("---")
         dl_c1, dl_c2 = st.columns([4, 1])
         with dl_c1:
@@ -1455,7 +1449,7 @@ with tab_alldata:
 
 
 # ============================================================
-# 底部导出区（综合导出）
+# 底部导出区
 # ============================================================
 st.divider()
 st.markdown("### 📥 导出处理清单")
