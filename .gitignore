@@ -1,23 +1,20 @@
-# 密钥文件
+# Streamlit 敏感信息（绝不提交）
 .streamlit/secrets.toml
-.streamlit/
-streamlit/secrets.toml
-secrets.toml
 
-# Python 缓存
+# Python
 __pycache__/
-*.pyc
-*.pyo
-
-# 虚拟环境
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
 env/
 
-# IDE
-.idea/
+# IDE / OS
 .vscode/
-
-# 系统文件
+.idea/
 .DS_Store
 Thumbs.db
+
+# 导出文件
+*.xlsx
+*.csv

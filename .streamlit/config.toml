@@ -1,0 +1,10 @@
+[server]
+# 单次拉取最多并发线程（防止 API 被打爆）
+maxThreads = 20
+# 提高 WebSocket 超时，避免拉数据时前端断开
+websocketPingTimeout = 120
+# 禁用文件监控（生产环境）
+fileWatcherType = "none"
+
+[browser]
+gatherUsageStats = false

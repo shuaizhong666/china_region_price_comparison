@@ -1,10 +1,14 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import requests
+import threading
+import time
 from datetime import timedelta, datetime
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ============================================================
 # 页面配置
@@ -77,13 +81,12 @@ st.markdown(
 )
 
 # ============================================================
-# 飞书应用凭证
+# 飞书应用凭证 & 常量
 # ============================================================
 APP_ID = st.secrets["feishu"]["app_id"]
 APP_SECRET = st.secrets["feishu"]["app_secret"]
 APP_TOKEN = st.secrets["feishu"]["app_token"]
 
-# ⚠️ 关键修改：去掉 view_id，直接拉取整张表（含历史数据）
 FEISHU_TABLES = {
     "京东": {"table_id": "tblmispSYGtkWZbU"},
     "天猫": {"table_id": "tblB2s1GxLyltgOg"},
@@ -113,6 +116,148 @@ PLATFORM_BADGE_HTML = {
 }
 
 BEIJING_TZ = "Asia/Shanghai"
+CACHE_TTL_SECONDS = 600  # 数据缓存有效期（秒）
+
+# ============================================================
+# 全局共享状态（跨会话）
+# ============================================================
+@st.cache_resource(show_spinner=False)
+def _get_shared_state():
+    """全局单例，所有 Streamlit 会话共享"""
+    return {
+        "df": None,               # 已处理的 DataFrame（共享对象，只读使用）
+        "updated_at": 0.0,        # 缓存时间戳
+        "errors": {},             # 拉取时产生的错误信息
+        "load_lock": threading.Lock(),   # 防止多线程同时拉数据
+        "token_value": None,
+        "token_expire": 0.0,
+        "token_lock": threading.Lock(),
+    }
+
+
+# ============================================================
+# 飞书 API 请求（带重试 + 指数退避）
+# ============================================================
+def _feishu_request(method: str, url: str, **kwargs) -> dict:
+    """
+    统一的飞书 API 调用封装：
+    - 429/5xx 自动重试
+    - 飞书限流码自动退避
+    - 指数退避 + 最大重试次数
+    """
+    retries = kwargs.pop("_retries", 4)
+    timeout = kwargs.pop("_timeout", 45)
+    last_err = "unknown"
+
+    for attempt in range(retries):
+        try:
+            resp = requests.request(method, url, timeout=timeout, **kwargs)
+
+            # HTTP 层面限流 / 服务端错误
+            if resp.status_code == 429 or resp.status_code >= 500:
+                last_err = f"HTTP {resp.status_code}"
+                if attempt < retries - 1:
+                    time.sleep(min(2 ** attempt, 15))
+                    continue
+                raise RuntimeError(f"飞书 HTTP 错误: {resp.status_code}")
+
+            resp.raise_for_status()
+            data = resp.json()
+            code = data.get("code")
+
+            if code in (None, 0):
+                return data
+
+            # 飞书限流常见错误码
+            if code in (99991400, 99991401, 1254291, 1000004):
+                last_err = f"限流 {code}: {data.get('msg')}"
+                if attempt < retries - 1:
+                    time.sleep(min(2 ** attempt, 15))
+                    continue
+                raise RuntimeError(f"飞书限流: {data.get('msg')}")
+
+            raise RuntimeError(f"飞书 API 错误: {data}")
+
+        except requests.exceptions.RequestException as e:
+            last_err = str(e)
+            if attempt < retries - 1:
+                time.sleep(min(2 ** attempt, 15))
+                continue
+            break
+
+    raise RuntimeError(f"飞书 API 请求失败（已重试 {retries} 次）: {last_err}")
+
+
+def _get_tenant_access_token() -> str:
+    """全局缓存的 token（带锁，防止并发重复获取）"""
+    state = _get_shared_state()
+    now = time.time()
+
+    if state["token_value"] and now < state["token_expire"]:
+        return state["token_value"]
+
+    with state["token_lock"]:
+        now = time.time()
+        if state["token_value"] and now < state["token_expire"]:
+            return state["token_value"]
+
+        data = _feishu_request(
+            "POST",
+            f"{FEISHU_BASE}/auth/v3/tenant_access_token/internal",
+            json={"app_id": APP_ID, "app_secret": APP_SECRET},
+        )
+        state["token_value"] = data["tenant_access_token"]
+        # 提前 5 分钟过期，留出安全余量
+        expire_sec = int(data.get("expire", 7200))
+        state["token_expire"] = now + max(expire_sec - 300, 60)
+        return state["token_value"]
+
+
+def _fetch_records(token: str, table_id: str) -> list:
+    """拉取整张表全部记录（分页）"""
+    headers = {"Authorization": f"Bearer {token}"}
+    records = []
+    page_token = None
+
+    while True:
+        params = {"page_size": 500}
+        if page_token:
+            params["page_token"] = page_token
+
+        data = _feishu_request(
+            "GET",
+            f"{FEISHU_BASE}/bitable/v1/apps/{APP_TOKEN}/tables/{table_id}/records",
+            headers=headers,
+            params=params,
+        )
+        items = data.get("data", {}).get("items", [])
+        records.extend(items)
+
+        if not data.get("data", {}).get("has_more"):
+            break
+        page_token = data["data"].get("page_token")
+
+    return records
+
+
+def _fetch_all_tables(token: str) -> tuple:
+    """并行拉取三张表（京东/天猫/拼多多），失败不阻塞其他表"""
+    results, errors = {}, {}
+
+    with ThreadPoolExecutor(max_workers=len(FEISHU_TABLES)) as ex:
+        futures = {
+            ex.submit(_fetch_records, token, cfg["table_id"]): name
+            for name, cfg in FEISHU_TABLES.items()
+        }
+        for fut in as_completed(futures):
+            name = futures[fut]
+            try:
+                results[name] = fut.result()
+            except Exception as e:
+                errors[name] = str(e)
+                results[name] = []
+
+    return results, errors
 
 
 # ============================================================
@@ -133,53 +278,21 @@ def convert_time_column(series: pd.Series) -> pd.Series:
 
 
 # ============================================================
-# 飞书数据拉取
+# 数据构建 & 处理
 # ============================================================
-@st.cache_data(ttl=7000, show_spinner=False)
-def get_tenant_access_token() -> str:
-    url = f"{FEISHU_BASE}/auth/v3/tenant_access_token/internal"
-    resp = requests.post(url, json={"app_id": APP_ID, "app_secret": APP_SECRET}, timeout=15)
-    data = resp.json()
-    if data.get("code") != 0:
-        raise RuntimeError(f"获取飞书 token 失败: {data}")
-    return data["tenant_access_token"]
-
-
-def _fetch_records(token: str, table_id: str) -> list:
-    """拉取整张表全部记录（不传 view_id，避免视图筛选导致只能看到当天数据）"""
-    headers = {"Authorization": f"Bearer {token}"}
-    records, page_token = [], None
-    while True:
-        url = f"{FEISHU_BASE}/bitable/v1/apps/{APP_TOKEN}/tables/{table_id}/records"
-        params = {"page_size": 500}
-        # 注意：这里故意不传 view_id
-        if page_token:
-            params["page_token"] = page_token
-        resp = requests.get(url, headers=headers, params=params, timeout=60)
-        data = resp.json()
-        if data.get("code") != 0:
-            raise RuntimeError(f"读取表 {table_id} 失败: {data.get('msg', data)}")
-        records.extend(data.get("data", {}).get("items", []))
-        if not data.get("data", {}).get("has_more"):
-            break
-        page_token = data["data"].get("page_token")
-    return records
-
-
-@st.cache_data(ttl=600, show_spinner="正在从飞书多维表格拉取全部历史数据...")
-def load_data() -> pd.DataFrame:
-    token = get_tenant_access_token()
+def _build_dataframe(tables: dict) -> pd.DataFrame:
     frames = []
-    for platform_name, cfg in FEISHU_TABLES.items():
-        records = _fetch_records(token, cfg["table_id"])
+    for platform_name, records in tables.items():
         if not records:
             continue
         rows = [{"_record_id": r.get("record_id", ""), **r.get("fields", {})} for r in records]
         df_p = pd.DataFrame(rows)
         df_p["_platform_source"] = platform_name
         frames.append(df_p)
+
     if not frames:
         return pd.DataFrame()
+
     df = pd.concat(frames, ignore_index=True)
     df = df.rename(columns={k: v for k, v in FIELD_MAP.items() if k in df.columns})
 
@@ -201,12 +314,10 @@ def load_data() -> pd.DataFrame:
     for col in ["公司限定价", "店铺到手价", "平台页面价"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df
 
 
-# ============================================================
-# 去重函数
-# ============================================================
 def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
     """区间去重：同一天同一商品多次采集，只保留记录时间最新的一条"""
     if df.empty:
@@ -247,7 +358,7 @@ def dedupe_by_latest(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ============================================================
-# 严重程度分级
+# 严重程度分级（向量化，替代 apply 加速）
 # ============================================================
 def classify_severity(diff: float) -> str:
     amt = abs(diff)
@@ -257,6 +368,77 @@ def classify_severity(diff: float) -> str:
         return "🟠 中度"
     else:
         return "🟡 轻微"
+
+
+def classify_severity_series(diff_series: pd.Series, compliant_label: str = None) -> pd.Series:
+    """向量化分级：比 apply 快 10-100 倍"""
+    amt = diff_series.abs().to_numpy()
+    labels = np.select(
+        [amt >= 100, amt >= 30],
+        ["🔴 严重", "🟠 中度"],
+        default="🟡 轻微",
+    )
+    result = pd.Series(labels, index=diff_series.index, dtype="object")
+    if compliant_label is not None:
+        result = result.mask(diff_series >= 0, compliant_label)
+    return result
+
+
+# ============================================================
+# 共享数据加载（核心防崩逻辑）
+# ============================================================
+def _load_and_process_data() -> tuple:
+    """真正执行拉取 + 处理，只在缓存失效时被调用一次"""
+    token = _get_tenant_access_token()
+    tables, errors = _fetch_all_tables(token)
+    df = _build_dataframe(tables)
+
+    if df.empty:
+        return df, errors
+
+    # 去重后作为全局共享数据
+    df_all = dedupe_latest(df)
+    return df_all, errors
+
+
+def get_shared_data(force_refresh: bool = False) -> tuple:
+    """
+    获取全局共享的 DataFrame。
+    - 使用双层检查锁：缓存有效时无锁直接返回
+    - 缓存失效时只有一个线程去拉数据，其他用户等待复用结果
+    """
+    state = _get_shared_state()
+    lock = state["load_lock"]
+    now = time.time()
+
+    # 快路径：命中缓存，无锁返回
+    if not force_refresh and state["df"] is not None:
+        if now - state["updated_at"] < CACHE_TTL_SECONDS:
+            return state["df"], state["errors"]
+
+    # 慢路径：加锁 + 双重检查
+    with lock:
+        now = time.time()
+        if not force_refresh and state["df"] is not None:
+            if now - state["updated_at"] < CACHE_TTL_SECONDS:
+                return state["df"], state["errors"]
+
+        with st.spinner("正在从飞书拉取数据（首次加载约需 10-30 秒）..."):
+            df, errors = _load_and_process_data()
+
+        state["df"] = df
+        state["updated_at"] = time.time()
+        state["errors"] = errors
+        return df, errors
+
+
+def invalidate_shared_data():
+    """手动清空共享缓存"""
+    state = _get_shared_state()
+    with state["load_lock"]:
+        state["df"] = None
+        state["updated_at"] = 0.0
+        state["errors"] = {}
 
 
 # ============================================================
@@ -448,9 +630,7 @@ def render_model_card(model_df: pd.DataFrame, limit_price: float):
                 shop_df["商品链接"] = None
 
             shop_df["价差"] = shop_df["店铺到手价"] - limit_price
-            shop_df["严重程度"] = shop_df["价差"].apply(
-                lambda x: classify_severity(x) if x < 0 else "✅ 合规"
-            )
+            shop_df["严重程度"] = classify_severity_series(shop_df["价差"], compliant_label="✅ 合规")
             shop_df = shop_df.sort_values("店铺到手价").reset_index(drop=True)
 
             st.dataframe(
@@ -503,7 +683,7 @@ def render_paginated_table(
 
     start = (page - 1) * page_size
     end = min(start + page_size, total)
-    page_df = df.iloc[start:end].copy()
+    page_df = df.iloc[start:end]
 
     with c3:
         st.markdown(
@@ -529,10 +709,58 @@ def render_paginated_table(
         return page_df, None
 
 
-def to_excel(sheets: dict) -> bytes:
+# ============================================================
+# Excel 导出（带缓存，避免每次 rerun 都重新生成）
+# ============================================================
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False, max_entries=3)
+def _build_excel_bytes(sheets_hashable: tuple) -> bytes:
+    """
+    传入 tuple 形式的 sheets 保证可哈希；结构：[("sheet_name", df), ...]
+    """
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        for name, df in sheets.items():
+        for name, df in sheets_hashable:
+            if df is not None and not df.empty:
+                df.to_excel(writer, sheet_name=name, index=False)
+    return buf.getvalue()
+
+
+def build_export_excel(sheets: dict) -> bytes:
+    """构造 key 让缓存能命中；用 shape + 关键列做轻量指纹"""
+    fingerprint = []
+    ordered = []
+    for name, df in sheets.items():
+        if df is None or df.empty:
+            ordered.append((name, df))
+            fingerprint.append((name, 0, 0))
+        else:
+            ordered.append((name, df))
+            fingerprint.append((name, df.shape[0], df.shape[1]))
+
+    # 用 (frozenset 指纹, 排序后的 df 结构) 做缓存 key
+    # 由于 df 无法直接哈希，这里把 fingerprint + 首末值 拼成元组
+    key_parts = [tuple(fingerprint)]
+    for name, df in ordered:
+        if df is not None and not df.empty:
+            try:
+                head = df.head(1).to_json()
+                tail = df.tail(1).to_json()
+            except Exception:
+                head, tail = "", ""
+            key_parts.append((name, head, tail))
+        else:
+            key_parts.append((name, "", ""))
+
+    # 直接调用内部函数（用 key_parts 做缓存key）
+    return _build_excel_bytes_cached(tuple(key_parts), tuple((n, d) for n, d in ordered))
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False, max_entries=3, hash_funcs={pd.DataFrame: lambda d: None})
+def _build_excel_bytes_cached(_key_parts, sheets_tuple):
+    """真正的 Excel 构建，_key_parts 用于缓存命中，DataFrame 被忽略哈希"""
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        for name, df in sheets_tuple:
             if df is not None and not df.empty:
                 df.to_excel(writer, sheet_name=name, index=False)
     return buf.getvalue()
@@ -542,12 +770,18 @@ def to_excel(sheets: dict) -> bytes:
 # 加载 & 处理数据
 # ============================================================
 try:
-    df_raw = load_data()
+    df_raw, load_errors = get_shared_data()
 except Exception as e:
     st.error(f"❌ 数据加载失败：{e}")
     st.stop()
 
-if df_raw.empty:
+if load_errors:
+    st.warning(
+        "⚠️ 部分平台数据拉取失败：" +
+        "、".join(f"{k}（{v[:60]}…）" if len(v) > 60 else f"{k}（{v}）" for k, v in load_errors.items())
+    )
+
+if df_raw is None or df_raw.empty:
     st.warning("⚠️ 飞书多维表格中暂无数据。")
     st.stop()
 
@@ -558,7 +792,8 @@ if missing:
     st.write("当前可用列：", list(df_raw.columns))
     st.stop()
 
-df_all = dedupe_latest(df_raw)
+# df_all 只读使用；任何筛选都必须 .copy()
+df_all = df_raw
 
 # 数据最新记录时间
 data_updated_at = None
@@ -604,7 +839,7 @@ with st.sidebar:
                 value=max_d,
                 min_value=selectable_min,
                 max_value=selectable_max,
-                help=f"显示每个商品在该日期及之前的最新一次采集记录",
+                help="显示每个商品在该日期及之前的最新一次采集记录",
             )
             end_date = as_of_date
             start_date = None
@@ -649,10 +884,10 @@ with st.sidebar:
 
     st.markdown("---")
     if st.button("🔄 刷新数据", width="stretch", type="primary"):
-        st.cache_data.clear()
+        invalidate_shared_data()
         st.rerun()
 
-    st.caption("🕒 缓存有效期 10 分钟")
+    st.caption("🕒 缓存有效期 10 分钟（全局共享）")
 
 
 # ============================================================
@@ -686,9 +921,7 @@ if df.empty:
 
 df["is_broken"] = df["店铺到手价"] < df["公司限定价"]
 df["破价金额"] = df["店铺到手价"] - df["公司限定价"]
-df["严重程度"] = df["破价金额"].apply(
-    lambda x: classify_severity(x) if x < 0 else "✅ 合规"
-)
+df["严重程度"] = classify_severity_series(df["破价金额"], compliant_label="✅ 合规")
 
 df_main = df[df["品类"] == selected_category].copy() if selected_category != "全部" else df.copy()
 
@@ -1519,7 +1752,7 @@ with exp_c2:
 
         cat_export = cat_agg.copy() if not cat_agg.empty else pd.DataFrame()
 
-        excel_bytes = to_excel({
+        excel_bytes = build_export_excel({
             "全部数据": all_export,
             "乱价明细": broken_export,
             "店铺乱价榜": shop_export,
