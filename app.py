@@ -111,6 +111,32 @@ PLATFORM_BADGE_HTML = {
     "拼多多": "<span class='plat-badge' style='background:#8e24aa;'>拼多多</span>",
 }
 
+# 北京时间时区
+BEIJING_TZ = "Asia/Shanghai"
+
+
+# ============================================================
+# 时间戳转换（关键修复：处理 UTC 时区问题）
+# ============================================================
+def convert_time_column(series: pd.Series) -> pd.Series:
+    """
+    将飞书返回的时间字段统一转为北京时间（naive datetime）。
+    - 数值型（毫秒时间戳）：按 UTC 解析 → 转北京时间
+    - 字符串/其他：直接 pd.to_datetime
+    """
+    if series is None or len(series) == 0:
+        return series
+
+    if pd.api.types.is_numeric_dtype(series):
+        try:
+            result = pd.to_datetime(series, unit="ms", utc=True, errors="coerce")
+            result = result.dt.tz_convert(BEIJING_TZ).dt.tz_localize(None)
+            return result
+        except Exception:
+            return pd.to_datetime(series, errors="coerce")
+    else:
+        return pd.to_datetime(series, errors="coerce")
+
 
 # ============================================================
 # 飞书数据拉取
@@ -174,12 +200,10 @@ def load_data() -> pd.DataFrame:
     else:
         df["平台"] = df["平台"].fillna(df["_platform_source"])
 
+    # 时间字段统一转换（含时区修复）
     for date_col in ["日期", "记录时间"]:
         if date_col in df.columns:
-            if pd.api.types.is_numeric_dtype(df[date_col]):
-                df[date_col] = pd.to_datetime(df[date_col], unit="ms", errors="coerce")
-            else:
-                df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+            df[date_col] = convert_time_column(df[date_col])
 
     for col in ["公司限定价", "店铺到手价", "平台页面价"]:
         if col in df.columns:
@@ -211,7 +235,7 @@ def dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def dedupe_by_latest(df: pd.DataFrame) -> pd.DataFrame:
-    """时间点快照去重：每个商品（平台+店铺+型号+SKU）只保留记录时间最新的一条（不区分日期）"""
+    """时间点快照去重：每个商品（平台+店铺+型号+SKU）只保留记录时间最新的一条"""
     if df.empty:
         return df
     df = df.copy()
@@ -543,6 +567,7 @@ if missing:
 
 df_all = dedupe_latest(df_raw)
 
+# 数据最新记录时间（显示在顶部）
 data_updated_at = None
 for c in ["记录时间", "日期"]:
     if c in df_all.columns:
@@ -567,34 +592,37 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # ---------- 日期选择器（关键修改：两种模式都支持历史）----------
+    # ---------- 日期选择器（放宽可选范围）----------
     start_date, end_date = None, None
 
     if "日期" in df_all.columns and df_all["日期"].notna().any():
         valid_dates = df_all["日期"].dropna()
         min_d = valid_dates.min().date()
         max_d = valid_dates.max().date()
+        today = datetime.now().date()
+
+        # 放开可选范围：从数据最早日期前 30 天，到"今天"（允许超出数据范围）
+        selectable_min = min_d - timedelta(days=30)
+        selectable_max = max(max_d, today)
 
         if snapshot_mode:
-            # 时间点快照：选择单个"截至日期"，默认数据最新日期
             as_of_date = st.date_input(
                 "📅 查看截至日期",
                 value=max_d,
-                min_value=min_d,
-                max_value=max_d,
-                help="显示每个商品在该日期及之前的最新一次采集记录",
+                min_value=selectable_min,
+                max_value=selectable_max,
+                help=f"数据实际范围：{min_d} ~ {max_d}\n可选择范围内任意日期，超出数据范围的日期将无记录",
             )
             end_date = as_of_date
             start_date = None
         else:
-            # 区间去重：选择起始和截止日期
             default_start = max(min_d, max_d - timedelta(days=30))
             date_pick = st.date_input(
                 "📅 日期范围",
                 value=(default_start, max_d),
-                min_value=min_d,
-                max_value=max_d,
-                help="选择要查看的日期区间",
+                min_value=selectable_min,
+                max_value=selectable_max,
+                help=f"数据实际范围：{min_d} ~ {max_d}",
             )
             if isinstance(date_pick, (tuple, list)) and len(date_pick) == 2:
                 start_date, end_date = date_pick
@@ -659,7 +687,7 @@ if df.empty:
     st.warning("⚠️ 当前筛选条件下没有数据，请调整日期或筛选条件。")
     st.stop()
 
-# 去重：时间点快照用 dedupe_by_latest，区间去重用 dedupe_latest
+# 去重
 if snapshot_mode:
     df = dedupe_by_latest(df)
 else:
@@ -692,14 +720,15 @@ freshness = ""
 if data_updated_at is not None:
     updated_str = data_updated_at.strftime("%Y-%m-%d %H:%M")
     delta_min = int((datetime.now() - data_updated_at.to_pydatetime()).total_seconds() / 60)
-    if delta_min < 60:
+    if delta_min < 0:
+        freshness = "（数据来自未来？请检查时区）"
+    elif delta_min < 60:
         freshness = f"（{delta_min} 分钟前）"
     elif delta_min < 1440:
         freshness = f"（{delta_min // 60} 小时前）"
     else:
         freshness = f"（{delta_min // 1440} 天前）"
 
-# 日期描述
 if snapshot_mode:
     date_desc = f"📸 截至 {end_date}" if end_date else "📸 时间点快照"
 else:
